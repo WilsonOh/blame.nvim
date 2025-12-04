@@ -64,6 +64,17 @@ function Git:blame(filename, cwd, commit, callback, err_cb)
     execute_command(blame_command, cwd, callback, err_cb)
 end
 
+function Git:get_remote_url(cwd, callback, err_cb)
+    local remote_url_command = { "git", "remote", "get-url", "origin" }
+    execute_command(remote_url_command, cwd, callback, err_cb)
+end
+
+function Git:get_mr_url(cwd, callback, commit, project_url, err_cb)
+    local remote_url_command =
+        { "get-gitlab-mr-url", project_url, commit.hash, commit.filename }
+    execute_command(remote_url_command, cwd, callback, err_cb)
+end
+
 function Git:git_root(cwd, callback, err_cb)
     local rev_parse_command = { "git", "rev-parse", "--show-toplevel" }
     execute_command(rev_parse_command, cwd, callback, err_cb)

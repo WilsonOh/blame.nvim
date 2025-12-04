@@ -4,6 +4,7 @@ local git = require("blame.git")
 local CommitInfo = require("blame.commit_info")
 local utils = require("blame.utils")
 local mappings = require("blame.mappings")
+local Curl = require("plenary.curl")
 
 ---@class WindowView : BlameView
 ---@field config Config
@@ -179,8 +180,7 @@ function WindowView:open(lines)
     )
     local cwd = vim.fn.expand("%:p:h")
     self.cwd = cwd
-    self.blame_stack_client =
-        BlameStack:new(self.config, self, file_path, cwd)
+    self.blame_stack_client = BlameStack:new(self.config, self, file_path, cwd)
 end
 
 function WindowView:update_opened_blame_view(blame_lines, lines_with_hl)
@@ -269,6 +269,16 @@ end
 function WindowView:setup_keybinds(buff)
     mappings.set_keymap(
         "n",
+        "open_commit_in_remote",
+        function()
+            self:open_commit_in_remote()
+        end,
+        { buffer = buff, nowait = true, silent = true, noremap = true },
+        self.config
+    )
+
+    mappings.set_keymap(
+        "n",
         "close",
         ":q<cr>",
         { buffer = buff, nowait = true, silent = true, noremap = true },
@@ -338,11 +348,29 @@ function WindowView:open_commit_info()
     self.commit_info:open(commit)
 end
 
+function WindowView:open_commit_in_remote()
+    local row, _ = unpack(vim.api.nvim_win_get_cursor(self.blame_window))
+    local commit = self.blamed_lines[row]
+    local err_cb = function(err)
+        vim.notify(err, vim.log.levels.INFO)
+    end
+
+    self.git_client:get_remote_url(self.cwd, function(remote_url_output)
+        ---@type string
+        local remote_url = remote_url_output[1]
+        local project_url =
+            remote_url:gsub("^.-@(.+):(.+)%.git$", "https://%1/%2")
+        self.git_client:get_mr_url(self.cwd, function(mr_url)
+            vim.ui.open(mr_url[1])
+        end, commit, project_url, err_cb)
+    end, err_cb)
+end
+
 function WindowView:show_full_commit()
     local row, _ = unpack(vim.api.nvim_win_get_cursor(self.blame_window))
     local commit = self.blamed_lines[row]
     local view = self.config.commit_detail_view or "tab"
-    if type(view) == 'function' then
+    if type(view) == "function" then
         local path = self.blame_stack_client.file_path
         view(commit.hash, row, path)
         return
@@ -352,45 +380,40 @@ function WindowView:show_full_commit()
         vim.notify(err, vim.log.levels.INFO)
     end
 
-    self.git_client:show(
-        nil,
-        self.cwd,
-        commit.hash,
-        function(show_output)
-            vim.schedule(function()
-                local gshow_buff = setup_commit_buffer(
-                    show_output,
-                    commit.hash,
-                    self.original_window
+    self.git_client:show(nil, self.cwd, commit.hash, function(show_output)
+        vim.schedule(function()
+            local gshow_buff = setup_commit_buffer(
+                show_output,
+                commit.hash,
+                self.original_window
+            )
+
+            if view == "tab" then
+                vim.cmd("tabnew")
+            elseif view == "vsplit" then
+                vim.cmd("vsplit")
+            elseif view == "split" then
+                vim.cmd("split")
+            end
+
+            if view == "current" then
+                vim.api.nvim_win_set_buf(self.original_window, gshow_buff)
+                self:close()
+            else
+                mappings.set_keymap("n", "close", ":q<CR>", {
+                    buffer = gshow_buff,
+                    nowait = true,
+                    silent = true,
+                    noremap = true,
+                }, self.config)
+                self:close()
+                vim.api.nvim_win_set_buf(
+                    vim.api.nvim_get_current_win(),
+                    gshow_buff
                 )
-
-                if view == "tab" then
-                    vim.cmd("tabnew")
-                elseif view == "vsplit" then
-                    vim.cmd("vsplit")
-                elseif view == "split" then
-                    vim.cmd("split")
-                end
-
-                if view == "current" then
-                    vim.api.nvim_win_set_buf(self.original_window, gshow_buff)
-                    self:close()
-                else
-                    mappings.set_keymap("n", "close", ":q<CR>", {
-                        buffer = gshow_buff,
-                        nowait = true,
-                        silent = true,
-                        noremap = true,
-                    }, self.config)
-                    self:close()
-                    vim.api.nvim_win_set_buf(
-                        vim.api.nvim_get_current_win(),
-                        gshow_buff
-                    )
-                end
-            end)
-        end, err_cb
-    )
+            end
+        end)
+    end, err_cb)
 end
 
 function WindowView:blame_stack_push()

@@ -52,6 +52,7 @@ local config = {
         stack_pop = "<BS>",
         show_commit = "<CR>",
         close = { "<esc>", "q" },
+        open_commit_in_remote = "o",
     },
 }
 
